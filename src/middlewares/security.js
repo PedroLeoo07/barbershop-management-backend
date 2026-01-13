@@ -1,6 +1,8 @@
 const rateLimit = require('express-rate-limit');
 const { config } = require('../config');
 const { ResponseService } = require('../utils/responses');
+const { AppError } = require('../utils/AppError');
+const { Logger } = require('../utils/Logger');
 
 /**
  * Rate limiting geral da aplicação
@@ -15,6 +17,16 @@ const generalRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res) => {
+    Logger.security('Rate limit exceeded', {
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      url: req.url
+    });
+    
+    const error = AppError.badRequest('Muitas tentativas. Tente novamente mais tarde.', 'RATE_LIMIT_EXCEEDED');
+    res.status(error.statusCode).json(error.toJSON());
+  }
 });
 
 /**
@@ -29,6 +41,19 @@ const authRateLimit = rateLimit({
     message: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
     error: 'Rate limit de autenticação excedido',
   },
+  handler: (req, res) => {
+    Logger.security('Auth rate limit exceeded', {
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      email: req.body?.email
+    });
+    
+    const error = AppError.badRequest(
+      'Muitas tentativas de login. Tente novamente em 15 minutos.',
+      'AUTH_RATE_LIMIT_EXCEEDED'
+    );
+    res.status(error.statusCode).json(error.toJSON());
+  }
 });
 
 /**
