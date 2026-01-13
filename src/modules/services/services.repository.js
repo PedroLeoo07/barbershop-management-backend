@@ -1,7 +1,7 @@
 const { BaseRepository } = require('../base.repository');
 
 // =====================================================
-// REPOSITORY PARA SERVIÇOS DA BARBEARIA
+// REPOSITORY PARA SERVIÇOS - NOVA ESTRUTURA
 // =====================================================
 
 class ServiceRepository extends BaseRepository {
@@ -9,6 +9,365 @@ class ServiceRepository extends BaseRepository {
     super();
     this.tableName = 'services';
   }
+
+  // =====================================================
+  // ➕ CRIAR SERVIÇO
+  // =====================================================
+
+  async createService(serviceData) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Lock para evitar duplicatas de nome
+      await client.query(`
+        SELECT 1 FROM services 
+        WHERE LOWER(name) = LOWER($1)
+        FOR UPDATE NOWAIT
+      `, [serviceData.name]);
+
+      // Verificar se já existe serviço com este nome
+      const existing = await client.query(`
+        SELECT id FROM services 
+        WHERE LOWER(name) = LOWER($1)
+      `, [serviceData.name]);
+
+      if (existing.rows.length > 0) {
+        throw { code: 'SERVICE_NAME_EXISTS', message: 'Já existe um serviço com este nome' };
+      }
+
+      // Inserir novo serviço
+      const result = await client.query(`
+        INSERT INTO services (
+          name, 
+          duration_minutes, 
+          price, 
+          active
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `, [
+        serviceData.name,
+        serviceData.duration_minutes,
+        serviceData.price,
+        serviceData.active !== false // Default true
+      ]);
+
+      await client.query('COMMIT');
+      
+      console.log(`[ServiceRepository] Serviço criado: ${serviceData.name}`);
+      return result.rows[0];
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[ServiceRepository] Erro ao criar serviço:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR SERVIÇO POR ID
+  // =====================================================
+
+  async findById(serviceId) {
+    try {
+      const result = await this.pool.query(`
+        SELECT *
+        FROM services
+        WHERE id = $1
+      `, [serviceId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'SERVICE_NOT_FOUND', message: 'Serviço não encontrado' };
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('[ServiceRepository] Erro ao buscar serviço:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // ✏️ ATUALIZAR SERVIÇO
+  // =====================================================
+
+  async updateService(serviceId, updateData) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Lock no serviço
+      await client.query(`
+        SELECT id FROM services 
+        WHERE id = $1
+        FOR UPDATE NOWAIT
+      `, [serviceId]);
+
+      // Verificar se existe
+      const existing = await client.query(`
+        SELECT * FROM services 
+        WHERE id = $1
+      `, [serviceId]);
+
+      if (existing.rows.length === 0) {
+        throw { code: 'SERVICE_NOT_FOUND', message: 'Serviço não encontrado' };
+      }
+
+      // Se mudando nome, verificar duplicatas
+      if (updateData.name && updateData.name !== existing.rows[0].name) {
+        const nameCheck = await client.query(`
+          SELECT id FROM services 
+          WHERE LOWER(name) = LOWER($1) AND id != $2
+        `, [updateData.name, serviceId]);
+
+        if (nameCheck.rows.length > 0) {
+          throw { code: 'SERVICE_NAME_EXISTS', message: 'Já existe um serviço com este nome' };
+        }
+      }
+
+      // Construir query de update dinamicamente
+      const fields = [];
+      const values = [];
+      let paramCount = 1;
+
+      for (const [key, value] of Object.entries(updateData)) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+
+      const result = await client.query(`
+        UPDATE services 
+        SET ${fields.join(', ')}
+        WHERE id = $${paramCount}
+        RETURNING *
+      `, [...values, serviceId]);
+
+      await client.query('COMMIT');
+      
+      console.log(`[ServiceRepository] Serviço atualizado: ${serviceId}`);
+      return result.rows[0];
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[ServiceRepository] Erro ao atualizar serviço:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 🗑️ DELETAR SERVIÇO
+  // =====================================================
+
+  async deleteService(serviceId) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Verificar se tem agendamentos futuros
+      const futureAppointments = await client.query(`
+        SELECT COUNT(*) as count
+        FROM appointments 
+        WHERE service_id = $1 
+          AND appointment_date >= CURRENT_DATE
+          AND status NOT IN ('CANCELED')
+      `, [serviceId]);
+
+      if (parseInt(futureAppointments.rows[0].count) > 0) {
+        throw { 
+          code: 'SERVICE_HAS_FUTURE_APPOINTMENTS', 
+          message: 'Não é possível remover serviço com agendamentos futuros' 
+        };
+      }
+
+      // Deletar serviço (hard delete nesta estrutura)
+      const result = await client.query(`
+        DELETE FROM services 
+        WHERE id = $1
+        RETURNING id
+      `, [serviceId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'SERVICE_NOT_FOUND', message: 'Serviço não encontrado' };
+      }
+
+      await client.query('COMMIT');
+      
+      console.log(`[ServiceRepository] Serviço removido: ${serviceId}`);
+      return true;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[ServiceRepository] Erro ao deletar serviço:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 📋 LISTAR SERVIÇOS COM FILTROS
+  // =====================================================
+
+  async listServices(filters = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        active,
+        search,
+        price_min,
+        price_max,
+        duration_min,
+        duration_max
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      
+      // Construir WHERE clause dinamicamente
+      const conditions = [];
+      const params = [];
+      let paramCount = 1;
+
+      if (active !== undefined) {
+        conditions.push(`active = $${paramCount}`);
+        params.push(active);
+        paramCount++;
+      }
+
+      if (search) {
+        conditions.push(`LOWER(name) LIKE LOWER($${paramCount})`);
+        params.push(`%${search}%`);
+        paramCount++;
+      }
+
+      if (price_min !== undefined) {
+        conditions.push(`price >= $${paramCount}`);
+        params.push(price_min);
+        paramCount++;
+      }
+
+      if (price_max !== undefined) {
+        conditions.push(`price <= $${paramCount}`);
+        params.push(price_max);
+        paramCount++;
+      }
+
+      if (duration_min !== undefined) {
+        conditions.push(`duration_minutes >= $${paramCount}`);
+        params.push(duration_min);
+        paramCount++;
+      }
+
+      if (duration_max !== undefined) {
+        conditions.push(`duration_minutes <= $${paramCount}`);
+        params.push(duration_max);
+        paramCount++;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Query principal
+      const result = await this.pool.query(`
+        SELECT 
+          *,
+          COUNT(*) OVER() as total_count
+        FROM services
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+      `, [...params, limit, offset]);
+
+      const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        services: result.rows,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1
+        }
+      };
+
+    } catch (error) {
+      console.error('[ServiceRepository] Erro ao listar serviços:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR SERVIÇOS POR TEXTO
+  // =====================================================
+
+  async searchServices(searchTerm, limit = 20) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          *,
+          -- Ranking por relevância
+          (
+            CASE 
+              WHEN LOWER(name) = LOWER($1) THEN 100
+              WHEN LOWER(name) LIKE LOWER($2) THEN 90
+              ELSE 80
+            END
+          ) as relevance_score
+        FROM services
+        WHERE active = true
+          AND LOWER(name) LIKE LOWER($2)
+        ORDER BY relevance_score DESC, name ASC
+        LIMIT $3
+      `, [searchTerm, `%${searchTerm}%`, limit]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('[ServiceRepository] Erro ao buscar serviços:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📊 SERVIÇOS POPULARES
+  // =====================================================
+
+  async getPopularServices(limit = 10, days = 30) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          s.*,
+          COUNT(a.service_id) as appointment_count,
+          SUM(s.price) as total_revenue
+        FROM services s
+        LEFT JOIN appointments a ON s.id = a.service_id
+          AND a.appointment_date >= NOW() - INTERVAL '$1 days'
+          AND a.status IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED')
+        WHERE s.active = true
+        GROUP BY s.id, s.name, s.duration_minutes, s.price, s.active, s.created_at
+        ORDER BY appointment_count DESC, total_revenue DESC
+        LIMIT $2
+      `, [days, limit]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('[ServiceRepository] Erro ao buscar serviços populares:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = { ServiceRepository };
 
   // =====================================================
   // ➕ CRIAR SERVIÇO

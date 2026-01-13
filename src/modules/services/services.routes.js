@@ -1,10 +1,11 @@
 const express = require('express');
 const { ServiceController } = require('./services.controller');
 const { AuthMiddleware } = require('../../middlewares/auth');
-const { RateLimiter } = require('../../middlewares/security');
+const { ValidationMiddleware } = require('../../middlewares/validation');
+const { ServiceSchemas } = require('./services.schemas');
 
 // =====================================================
-// ROTAS PARA SERVIÇOS DA BARBEARIA
+// ROTAS PARA SERVIÇOS - NOVA ESTRUTURA
 // =====================================================
 
 const router = express.Router();
@@ -14,38 +15,49 @@ const serviceController = new ServiceController();
 // 📋 ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
 // =====================================================
 
-// GET /api/services - Listar serviços (público, para clientes verem)
+// GET /api/services - Listar serviços (público)
 router.get(
   '/',
-  RateLimiter.create({ windowMs: 1 * 60 * 1000, max: 30 }), // 30 requests por minuto
+  ValidationMiddleware.validateQuery(ServiceSchemas.listServices),
   serviceController.listServices
 );
 
 // GET /api/services/search - Buscar serviços (público)
 router.get(
   '/search',
-  RateLimiter.create({ windowMs: 1 * 60 * 1000, max: 20 }), // 20 requests por minuto
+  ValidationMiddleware.validateQuery(ServiceSchemas.searchServices),
   serviceController.searchServices
 );
 
 // GET /api/services/popular - Serviços populares (público)
 router.get(
   '/popular',
-  RateLimiter.create({ windowMs: 1 * 60 * 1000, max: 20 }), // 20 requests por minuto
+  ValidationMiddleware.validateQuery(ServiceSchemas.popularServices),
   serviceController.getPopularServices
 );
 
-// GET /api/services/categories - Categorias de serviços (público)
+// GET /api/services/active - Serviços ativos (público)
 router.get(
-  '/categories',
-  RateLimiter.create({ windowMs: 1 * 60 * 1000, max: 30 }), // 30 requests por minuto
-  serviceController.getCategories
+  '/active',
+  serviceController.getActiveServices
+);
+
+// POST /api/services/duration - Calcular duração total de serviços
+router.post(
+  '/duration',
+  serviceController.getServicesDuration
+);
+
+// POST /api/services/price - Calcular preço total de serviços
+router.post(
+  '/price',
+  serviceController.getServicesPrice
 );
 
 // GET /api/services/:id - Buscar serviço específico (público)
 router.get(
   '/:id',
-  RateLimiter.create({ windowMs: 1 * 60 * 1000, max: 30 }), // 30 requests por minuto
+  ValidationMiddleware.validateParams(ServiceSchemas.serviceId),
   serviceController.getServiceById
 );
 

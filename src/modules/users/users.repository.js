@@ -1,8 +1,7 @@
-const { BaseRepository } = require('../../shared/database/BaseRepository');
-const { AppError } = require('../../shared/errors/AppError');
+const { BaseRepository } = require('../base.repository');
 
 // =====================================================
-// REPOSITÓRIO DE USUÁRIOS COM SQL LOCKS
+// REPOSITÓRIO DE USUÁRIOS - NOVA ESTRUTURA
 // =====================================================
 
 class UserRepository extends BaseRepository {
@@ -12,41 +11,355 @@ class UserRepository extends BaseRepository {
   }
 
   // =====================================================
-  // 🔐 CRIAÇÃO DE USUÁRIO COM VALIDAÇÃO
+  // ➕ CRIAR USUÁRIO
   // =====================================================
 
   async createUser(userData) {
-    return this.executeTransaction(async (client) => {
-      // Verificar se email já existe (com lock)
-      const existingUser = await client.query(
-        `SELECT id FROM users WHERE email = $1 FOR UPDATE`,
-        [userData.email]
-      );
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
 
-      if (existingUser.rows.length > 0) {
-        throw AppError.duplicateEntry('email', userData.email);
+      // Lock para verificar email único
+      await client.query(`
+        SELECT 1 FROM users 
+        WHERE email = $1
+        FOR UPDATE NOWAIT
+      `, [userData.email]);
+
+      // Verificar se email já existe
+      const existing = await client.query(`
+        SELECT id FROM users 
+        WHERE email = $1
+      `, [userData.email]);
+
+      if (existing.rows.length > 0) {
+        throw { code: 'EMAIL_EXISTS', message: 'Email já está em uso' };
       }
 
-      // Criar usuário
-      const query = `
-        INSERT INTO users (name, email, password_hash, role, phone, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, name, email, role, phone, is_active, created_at
-      `;
-
-      const result = await client.query(query, [
+      // Inserir novo usuário
+      const result = await client.query(`
+        INSERT INTO users (
+          name, 
+          email, 
+          password_hash, 
+          role
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, name, email, role, created_at
+      `, [
         userData.name,
         userData.email,
         userData.password_hash,
-        userData.role || 'CLIENT',
-        userData.phone || null,
-        userData.is_active !== false // default true
+        userData.role || 'CLIENT'
       ]);
 
-      console.log(`✅ User created: ${userData.email} (${userData.role || 'CLIENT'})`);
+      await client.query('COMMIT');
+      
+      console.log(`[UserRepository] Usuário criado: ${userData.email} - ${userData.role || 'CLIENT'}`);
       return result.rows[0];
-    });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[UserRepository] Erro ao criar usuário:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
+
+  // =====================================================
+  // 🔍 BUSCAR USUÁRIO POR EMAIL
+  // =====================================================
+
+  async findByEmail(email) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, name, email, role, created_at
+        FROM users 
+        WHERE email = $1
+      `, [email]);
+
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('[UserRepository] Erro ao buscar usuário por email:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔐 BUSCAR USUÁRIO COM SENHA (PARA LOGIN)
+  // =====================================================
+
+  async findByEmailWithPassword(email) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, name, email, password_hash, role, created_at
+        FROM users 
+        WHERE email = $1
+      `, [email]);
+
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('[UserRepository] Erro ao buscar usuário com senha:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR USUÁRIO POR ID
+  // =====================================================
+
+  async findById(userId) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, name, email, role, created_at
+        FROM users 
+        WHERE id = $1
+      `, [userId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'USER_NOT_FOUND', message: 'Usuário não encontrado' };
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('[UserRepository] Erro ao buscar usuário por ID:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // ✏️ ATUALIZAR USUÁRIO
+  // =====================================================
+
+  async updateUser(userId, updateData) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Lock no usuário
+      await client.query(`
+        SELECT id FROM users 
+        WHERE id = $1
+        FOR UPDATE NOWAIT
+      `, [userId]);
+
+      // Verificar se existe
+      const existing = await client.query(`
+        SELECT * FROM users 
+        WHERE id = $1
+      `, [userId]);
+
+      if (existing.rows.length === 0) {
+        throw { code: 'USER_NOT_FOUND', message: 'Usuário não encontrado' };
+      }
+
+      // Se mudando email, verificar duplicatas
+      if (updateData.email && updateData.email !== existing.rows[0].email) {
+        const emailCheck = await client.query(`
+          SELECT id FROM users 
+          WHERE email = $1 AND id != $2
+        `, [updateData.email, userId]);
+
+        if (emailCheck.rows.length > 0) {
+          throw { code: 'EMAIL_EXISTS', message: 'Email já está em uso' };
+        }
+      }
+
+      // Construir query de update dinamicamente
+      const fields = [];
+      const values = [];
+      let paramCount = 1;
+
+      for (const [key, value] of Object.entries(updateData)) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+
+      const result = await client.query(`
+        UPDATE users 
+        SET ${fields.join(', ')}
+        WHERE id = $${paramCount}
+        RETURNING id, name, email, role, created_at
+      `, [...values, userId]);
+
+      await client.query('COMMIT');
+      
+      console.log(`[UserRepository] Usuário atualizado: ${userId}`);
+      return result.rows[0];
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[UserRepository] Erro ao atualizar usuário:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 🗑️ DELETAR USUÁRIO
+  // =====================================================
+
+  async deleteUser(userId) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Verificar se usuário tem agendamentos futuros
+      const futureAppointments = await client.query(`
+        SELECT COUNT(*) as count
+        FROM appointments 
+        WHERE user_id = $1 
+          AND appointment_date >= CURRENT_DATE
+          AND status NOT IN ('CANCELED')
+      `, [userId]);
+
+      if (parseInt(futureAppointments.rows[0].count) > 0) {
+        throw { 
+          code: 'USER_HAS_FUTURE_APPOINTMENTS', 
+          message: 'Não é possível remover usuário com agendamentos futuros' 
+        };
+      }
+
+      // Deletar usuário (hard delete nesta estrutura)
+      const result = await client.query(`
+        DELETE FROM users 
+        WHERE id = $1
+        RETURNING id
+      `, [userId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'USER_NOT_FOUND', message: 'Usuário não encontrado' };
+      }
+
+      await client.query('COMMIT');
+      
+      console.log(`[UserRepository] Usuário removido: ${userId}`);
+      return true;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[UserRepository] Erro ao deletar usuário:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 📋 LISTAR USUÁRIOS COM FILTROS
+  // =====================================================
+
+  async listUsers(filters = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        role,
+        search
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      
+      // Construir WHERE clause dinamicamente
+      const conditions = [];
+      const params = [];
+      let paramCount = 1;
+
+      if (role) {
+        conditions.push(`role = $${paramCount}`);
+        params.push(role);
+        paramCount++;
+      }
+
+      if (search) {
+        conditions.push(`(
+          LOWER(name) LIKE LOWER($${paramCount}) OR 
+          LOWER(email) LIKE LOWER($${paramCount + 1})
+        )`);
+        params.push(`%${search}%`, `%${search}%`);
+        paramCount += 2;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Query principal
+      const result = await this.pool.query(`
+        SELECT 
+          id, name, email, role, created_at,
+          COUNT(*) OVER() as total_count
+        FROM users
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+      `, [...params, limit, offset]);
+
+      const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        users: result.rows,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1
+        }
+      };
+
+    } catch (error) {
+      console.error('[UserRepository] Erro ao listar usuários:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR USUÁRIOS POR TEXTO
+  // =====================================================
+
+  async searchUsers(searchTerm, limit = 20) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, name, email, role, created_at,
+          -- Ranking por relevância
+          (
+            CASE 
+              WHEN LOWER(email) = LOWER($1) THEN 100
+              WHEN LOWER(name) = LOWER($1) THEN 90
+              WHEN LOWER(email) LIKE LOWER($2) THEN 80
+              WHEN LOWER(name) LIKE LOWER($2) THEN 70
+              ELSE 60
+            END
+          ) as relevance_score
+        FROM users
+        WHERE (
+          LOWER(name) LIKE LOWER($2) OR
+          LOWER(email) LIKE LOWER($2)
+        )
+        ORDER BY relevance_score DESC, name ASC
+        LIMIT $3
+      `, [searchTerm, `%${searchTerm}%`, limit]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('[UserRepository] Erro ao buscar usuários:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = { UserRepository };
 
   // =====================================================
   // 🔍 BUSCAR USUÁRIO POR EMAIL (PARA LOGIN)

@@ -1,7 +1,8 @@
 const { ServiceRepository } = require('./services.repository');
+const { AppError } = require('../../utils/AppError');
 
 // =====================================================
-// SERVICE PARA SERVIÇOS DA BARBEARIA (APENAS ADMIN)
+// SERVIÇO PARA GERENCIAMENTO DE SERVIÇOS - NOVA ESTRUTURA
 // =====================================================
 
 class ServiceService {
@@ -10,24 +11,36 @@ class ServiceService {
   }
 
   // =====================================================
-  // ➕ CRIAR SERVIÇO (APENAS ADMIN)
+  // 📝 CRIAR NOVO SERVIÇO
   // =====================================================
 
-  async createService(serviceData, adminUserId) {
+  async createService(serviceData) {
     try {
-      console.log(`[ServiceService] Admin ${adminUserId} criando serviço: ${serviceData.name}`);
+      // Verificar se já existe um serviço com o mesmo nome
+      const existingService = await this.serviceRepository.findByName(serviceData.name);
+      if (existingService) {
+        const error = new AppError('Já existe um serviço com este nome', 409);
+        error.code = 'SERVICE_NAME_EXISTS';
+        throw error;
+      }
 
       // Validações de negócio
-      this._validateServiceData(serviceData);
+      if (serviceData.duration_minutes < 1 || serviceData.duration_minutes > 480) {
+        const error = new AppError('Duração deve estar entre 1 e 480 minutos', 400);
+        error.code = 'INVALID_DURATION';
+        throw error;
+      }
+
+      if (serviceData.price <= 0) {
+        const error = new AppError('Preço deve ser positivo', 400);
+        error.code = 'INVALID_PRICE';
+        throw error;
+      }
 
       // Criar serviço
-      const service = await this.serviceRepository.createService(serviceData, adminUserId);
-
-      return {
-        ...service,
-        message: 'Serviço criado com sucesso'
-      };
-
+      const service = await this.serviceRepository.createService(serviceData);
+      
+      return service;
     } catch (error) {
       console.error('[ServiceService] Erro ao criar serviço:', error);
       throw error;
@@ -35,18 +48,291 @@ class ServiceService {
   }
 
   // =====================================================
-  // ✏️ ATUALIZAR SERVIÇO (APENAS ADMIN)
+  // ✏️ ATUALIZAR SERVIÇO
   // =====================================================
 
-  async updateService(serviceId, updateData, adminUserId) {
+  async updateService(serviceId, updateData) {
     try {
-      console.log(`[ServiceService] Admin ${adminUserId} atualizando serviço: ${serviceId}`);
-
-      // Validações de negócio se houver mudanças de preço/duração
-      if (updateData.price_min !== undefined || updateData.price_max !== undefined ||
-          updateData.duration_min !== undefined || updateData.duration_max !== undefined) {
-        this._validateServiceData({ ...updateData });
+      // Verificar se o serviço existe
+      const existingService = await this.serviceRepository.findById(serviceId);
+      if (!existingService) {
+        const error = new AppError('Serviço não encontrado', 404);
+        error.code = 'SERVICE_NOT_FOUND';
+        throw error;
       }
+
+      // Verificar se o nome não está sendo usado por outro serviço
+      if (updateData.name && updateData.name !== existingService.name) {
+        const nameExists = await this.serviceRepository.findByName(updateData.name);
+        if (nameExists && nameExists.id !== serviceId) {
+          const error = new AppError('Já existe um serviço com este nome', 409);
+          error.code = 'SERVICE_NAME_EXISTS';
+          throw error;
+        }
+      }
+
+      // Validações de negócio
+      if (updateData.duration_minutes && (updateData.duration_minutes < 1 || updateData.duration_minutes > 480)) {
+        const error = new AppError('Duração deve estar entre 1 e 480 minutos', 400);
+        error.code = 'INVALID_DURATION';
+        throw error;
+      }
+
+      if (updateData.price && updateData.price <= 0) {
+        const error = new AppError('Preço deve ser positivo', 400);
+        error.code = 'INVALID_PRICE';
+        throw error;
+      }
+
+      // Atualizar serviço
+      const updatedService = await this.serviceRepository.updateService(serviceId, updateData);
+      
+      return updatedService;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao atualizar serviço:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🗑️ DELETAR SERVIÇO
+  // =====================================================
+
+  async deleteService(serviceId) {
+    try {
+      // Verificar se o serviço existe
+      const existingService = await this.serviceRepository.findById(serviceId);
+      if (!existingService) {
+        const error = new AppError('Serviço não encontrado', 404);
+        error.code = 'SERVICE_NOT_FOUND';
+        throw error;
+      }
+
+      // Verificar se há agendamentos futuros com este serviço
+      const hasFutureAppointments = await this.serviceRepository.hasFutureAppointments(serviceId);
+      if (hasFutureAppointments) {
+        const error = new AppError('Não é possível remover serviço com agendamentos futuros', 400);
+        error.code = 'SERVICE_HAS_FUTURE_APPOINTMENTS';
+        throw error;
+      }
+
+      // Deletar serviço
+      await this.serviceRepository.deleteService(serviceId);
+      
+      return true;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao deletar serviço:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📋 LISTAR SERVIÇOS COM FILTROS E PAGINAÇÃO
+  // =====================================================
+
+  async listServices(params) {
+    try {
+      const result = await this.serviceRepository.findWithFilters(params);
+      
+      return result;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao listar serviços:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR SERVIÇO POR ID
+  // =====================================================
+
+  async getServiceById(serviceId) {
+    try {
+      const service = await this.serviceRepository.findById(serviceId);
+      
+      if (!service) {
+        const error = new AppError('Serviço não encontrado', 404);
+        error.code = 'SERVICE_NOT_FOUND';
+        throw error;
+      }
+      
+      return service;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao buscar serviço:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR SERVIÇOS POR TEXTO
+  // =====================================================
+
+  async searchServices(searchTerm, limit = 20) {
+    try {
+      const services = await this.serviceRepository.searchByName(searchTerm, limit);
+      
+      return services;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao buscar serviços:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📊 SERVIÇOS POPULARES
+  // =====================================================
+
+  async getPopularServices(limit = 10, days = 30) {
+    try {
+      const services = await this.serviceRepository.findPopular(limit, days);
+      
+      return services;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao buscar serviços populares:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🎯 SERVIÇOS ATIVOS
+  // =====================================================
+
+  async getActiveServices() {
+    try {
+      const services = await this.serviceRepository.findActive();
+      
+      return services;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao buscar serviços ativos:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // ⏰ CALCULAR DURAÇÃO TOTAL DE SERVIÇOS
+  // =====================================================
+
+  async getTotalDuration(serviceIds) {
+    try {
+      if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
+        throw new AppError('Lista de IDs de serviços é obrigatória', 400);
+      }
+
+      const totalDuration = await this.serviceRepository.getTotalDuration(serviceIds);
+      
+      return totalDuration;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao calcular duração total:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 💰 CALCULAR PREÇO TOTAL DE SERVIÇOS
+  // =====================================================
+
+  async getTotalPrice(serviceIds) {
+    try {
+      if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
+        throw new AppError('Lista de IDs de serviços é obrigatória', 400);
+      }
+
+      const totalPrice = await this.serviceRepository.getTotalPrice(serviceIds);
+      
+      return totalPrice;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao calcular preço total:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📱 ALTERNAR STATUS DO SERVIÇO
+  // =====================================================
+
+  async toggleServiceStatus(serviceId) {
+    try {
+      // Verificar se o serviço existe
+      const existingService = await this.serviceRepository.findById(serviceId);
+      if (!existingService) {
+        const error = new AppError('Serviço não encontrado', 404);
+        error.code = 'SERVICE_NOT_FOUND';
+        throw error;
+      }
+
+      // Alternar status
+      const newStatus = !existingService.active;
+      const updatedService = await this.serviceRepository.updateService(serviceId, { active: newStatus });
+      
+      return updatedService;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao alternar status:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📊 ESTATÍSTICAS DOS SERVIÇOS
+  // =====================================================
+
+  async getServiceStats() {
+    try {
+      const stats = await this.serviceRepository.getStats();
+      
+      return stats;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao obter estatísticas:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔄 SERVIÇOS SIMILARES (por preço/duração)
+  // =====================================================
+
+  async getSimilarServices(serviceId, limit = 5) {
+    try {
+      // Verificar se o serviço existe
+      const service = await this.serviceRepository.findById(serviceId);
+      if (!service) {
+        const error = new AppError('Serviço não encontrado', 404);
+        error.code = 'SERVICE_NOT_FOUND';
+        throw error;
+      }
+
+      // Buscar serviços similares
+      const similarServices = await this.serviceRepository.findSimilar(serviceId, limit);
+      
+      return similarServices;
+    } catch (error) {
+      console.error('[ServiceService] Erro ao buscar serviços similares:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🎲 VALIDAÇÕES AUXILIARES
+  // =====================================================
+
+  validateServiceData(data) {
+    const errors = [];
+
+    if (data.name && data.name.length < 2) {
+      errors.push('Nome deve ter pelo menos 2 caracteres');
+    }
+
+    if (data.duration_minutes && (data.duration_minutes < 1 || data.duration_minutes > 480)) {
+      errors.push('Duração deve estar entre 1 e 480 minutos');
+    }
+
+    if (data.price && data.price <= 0) {
+      errors.push('Preço deve ser positivo');
+    }
+
+    return errors;
+  }
+}
+
+module.exports = { ServiceService };
 
       // Atualizar serviço
       const service = await this.serviceRepository.updateService(serviceId, updateData, adminUserId);

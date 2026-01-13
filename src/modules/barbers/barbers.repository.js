@@ -1,8 +1,7 @@
-const { BaseRepository } = require('../../shared/database/BaseRepository');
-const { AppError } = require('../../shared/errors/AppError');
+const { BaseRepository } = require('../base.repository');
 
 // =====================================================
-// REPOSITÓRIO DE BARBEIROS
+// REPOSITORY PARA BARBEIROS - NOVA ESTRUTURA
 // =====================================================
 
 class BarberRepository extends BaseRepository {
@@ -12,12 +11,368 @@ class BarberRepository extends BaseRepository {
   }
 
   // =====================================================
-  // 🔧 CRIAR BARBEIRO
+  // ➕ CRIAR BARBEIRO
   // =====================================================
 
   async createBarber(barberData) {
-    return this.executeTransaction(async (client) => {
-      // Se tem user_id, verificar se é válido e não está sendo usado
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Lock para evitar duplicatas de nome
+      await client.query(`
+        SELECT 1 FROM barbers 
+        WHERE LOWER(name) = LOWER($1)
+        FOR UPDATE NOWAIT
+      `, [barberData.name]);
+
+      // Verificar se já existe barbeiro com este nome
+      const existing = await client.query(`
+        SELECT id FROM barbers 
+        WHERE LOWER(name) = LOWER($1)
+      `, [barberData.name]);
+
+      if (existing.rows.length > 0) {
+        throw { code: 'BARBER_NAME_EXISTS', message: 'Já existe um barbeiro com este nome' };
+      }
+
+      // Inserir novo barbeiro
+      const result = await client.query(`
+        INSERT INTO barbers (
+          name, 
+          active
+        )
+        VALUES ($1, $2)
+        RETURNING *
+      `, [
+        barberData.name,
+        barberData.active !== false // Default true
+      ]);
+
+      await client.query('COMMIT');
+      
+      console.log(`[BarberRepository] Barbeiro criado: ${barberData.name}`);
+      return result.rows[0];
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[BarberRepository] Erro ao criar barbeiro:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR BARBEIRO POR ID
+  // =====================================================
+
+  async findById(barberId) {
+    try {
+      const result = await this.pool.query(`
+        SELECT *
+        FROM barbers
+        WHERE id = $1
+      `, [barberId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'BARBER_NOT_FOUND', message: 'Barbeiro não encontrado' };
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('[BarberRepository] Erro ao buscar barbeiro:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // ✏️ ATUALIZAR BARBEIRO
+  // =====================================================
+
+  async updateBarber(barberId, updateData) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Lock no barbeiro
+      await client.query(`
+        SELECT id FROM barbers 
+        WHERE id = $1
+        FOR UPDATE NOWAIT
+      `, [barberId]);
+
+      // Verificar se existe
+      const existing = await client.query(`
+        SELECT * FROM barbers 
+        WHERE id = $1
+      `, [barberId]);
+
+      if (existing.rows.length === 0) {
+        throw { code: 'BARBER_NOT_FOUND', message: 'Barbeiro não encontrado' };
+      }
+
+      // Se mudando nome, verificar duplicatas
+      if (updateData.name && updateData.name !== existing.rows[0].name) {
+        const nameCheck = await client.query(`
+          SELECT id FROM barbers 
+          WHERE LOWER(name) = LOWER($1) AND id != $2
+        `, [updateData.name, barberId]);
+
+        if (nameCheck.rows.length > 0) {
+          throw { code: 'BARBER_NAME_EXISTS', message: 'Já existe um barbeiro com este nome' };
+        }
+      }
+
+      // Construir query de update dinamicamente
+      const fields = [];
+      const values = [];
+      let paramCount = 1;
+
+      for (const [key, value] of Object.entries(updateData)) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+
+      const result = await client.query(`
+        UPDATE barbers 
+        SET ${fields.join(', ')}
+        WHERE id = $${paramCount}
+        RETURNING *
+      `, [...values, barberId]);
+
+      await client.query('COMMIT');
+      
+      console.log(`[BarberRepository] Barbeiro atualizado: ${barberId}`);
+      return result.rows[0];
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[BarberRepository] Erro ao atualizar barbeiro:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 🗑️ DELETAR BARBEIRO
+  // =====================================================
+
+  async deleteBarber(barberId) {
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+
+      // Verificar se tem agendamentos futuros
+      const futureAppointments = await client.query(`
+        SELECT COUNT(*) as count
+        FROM appointments 
+        WHERE barber_id = $1 
+          AND appointment_date >= CURRENT_DATE
+          AND status NOT IN ('CANCELED')
+      `, [barberId]);
+
+      if (parseInt(futureAppointments.rows[0].count) > 0) {
+        throw { 
+          code: 'BARBER_HAS_FUTURE_APPOINTMENTS', 
+          message: 'Não é possível remover barbeiro com agendamentos futuros' 
+        };
+      }
+
+      // Deletar barbeiro (hard delete nesta estrutura)
+      const result = await client.query(`
+        DELETE FROM barbers 
+        WHERE id = $1
+        RETURNING id
+      `, [barberId]);
+
+      if (result.rows.length === 0) {
+        throw { code: 'BARBER_NOT_FOUND', message: 'Barbeiro não encontrado' };
+      }
+
+      await client.query('COMMIT');
+      
+      console.log(`[BarberRepository] Barbeiro removido: ${barberId}`);
+      return true;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('[BarberRepository] Erro ao deletar barbeiro:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // =====================================================
+  // 📋 LISTAR BARBEIROS COM FILTROS
+  // =====================================================
+
+  async listBarbers(filters = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        active,
+        search
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      
+      // Construir WHERE clause dinamicamente
+      const conditions = [];
+      const params = [];
+      let paramCount = 1;
+
+      if (active !== undefined) {
+        conditions.push(`active = $${paramCount}`);
+        params.push(active);
+        paramCount++;
+      }
+
+      if (search) {
+        conditions.push(`LOWER(name) LIKE LOWER($${paramCount})`);
+        params.push(`%${search}%`);
+        paramCount++;
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // Query principal
+      const result = await this.pool.query(`
+        SELECT 
+          *,
+          COUNT(*) OVER() as total_count
+        FROM barbers
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+      `, [...params, limit, offset]);
+
+      const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+      const totalPages = Math.ceil(totalCount / limit);
+
+      return {
+        barbers: result.rows,
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1
+        }
+      };
+
+    } catch (error) {
+      console.error('[BarberRepository] Erro ao listar barbeiros:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 🔍 BUSCAR BARBEIROS POR TEXTO
+  // =====================================================
+
+  async searchBarbers(searchTerm, limit = 20) {
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          *,
+          -- Ranking por relevância
+          (
+            CASE 
+              WHEN LOWER(name) = LOWER($1) THEN 100
+              WHEN LOWER(name) LIKE LOWER($2) THEN 90
+              ELSE 80
+            END
+          ) as relevance_score
+        FROM barbers
+        WHERE active = true
+          AND LOWER(name) LIKE LOWER($2)
+        ORDER BY relevance_score DESC, name ASC
+        LIMIT $3
+      `, [searchTerm, `%${searchTerm}%`, limit]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('[BarberRepository] Erro ao buscar barbeiros:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
+  // 📊 BARBEIROS DISPONÍVEIS PARA UM HORÁRIO
+  // =====================================================
+
+  async findAvailableBarbers(date, time, duration) {
+    try {
+      // Calcular horário de fim baseado na duração
+      const result = await this.pool.query(`
+        SELECT b.*
+        FROM barbers b
+        WHERE b.active = true
+          AND NOT EXISTS (
+            -- Verificar agendamentos que conflitam
+            SELECT 1 
+            FROM appointments a
+            JOIN services s ON a.service_id = s.id
+            WHERE a.barber_id = b.id
+              AND a.appointment_date = $1
+              AND a.status NOT IN ('CANCELED')
+              AND (
+                -- Novo horário conflita com agendamento existente
+                (
+                  $2::TIME >= a.appointment_time AND 
+                  $2::TIME < a.appointment_time + (s.duration_minutes || ' minutes')::INTERVAL
+                )
+                OR
+                -- Novo horário termina durante agendamento existente
+                (
+                  ($2::TIME + ($3 || ' minutes')::INTERVAL) > a.appointment_time AND
+                  ($2::TIME + ($3 || ' minutes')::INTERVAL) <= a.appointment_time + (s.duration_minutes || ' minutes')::INTERVAL
+                )
+                OR
+                -- Novo horário engloba agendamento existente
+                (
+                  $2::TIME <= a.appointment_time AND
+                  ($2::TIME + ($3 || ' minutes')::INTERVAL) >= a.appointment_time + (s.duration_minutes || ' minutes')::INTERVAL
+                )
+              )
+          )
+          AND NOT EXISTS (
+            -- Verificar horários bloqueados
+            SELECT 1
+            FROM blocked_hours bh
+            WHERE bh.barber_id = b.id
+              AND bh.blocked_date = $1
+              AND (
+                ($2::TIME >= bh.start_time AND $2::TIME < bh.end_time)
+                OR
+                (($2::TIME + ($3 || ' minutes')::INTERVAL) > bh.start_time AND 
+                 ($2::TIME + ($3 || ' minutes')::INTERVAL) <= bh.end_time)
+                OR
+                ($2::TIME <= bh.start_time AND 
+                 ($2::TIME + ($3 || ' minutes')::INTERVAL) >= bh.end_time)
+              )
+          )
+        ORDER BY b.name
+      `, [date, time, duration]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('[BarberRepository] Erro ao buscar barbeiros disponíveis:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = { BarberRepository };
       if (barberData.user_id) {
         const userExists = await client.query(
           `SELECT id FROM users WHERE id = $1 AND role = 'ADMIN'`,

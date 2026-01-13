@@ -1,10 +1,10 @@
 const { ServiceService } = require('./services.service');
 const { ServiceSchemas } = require('./services.schemas');
 const { ValidationMiddleware } = require('../../middlewares/validation');
-const { ResponseUtils } = require('../../utils/responses');
+const { responses } = require('../../utils/responses');
 
 // =====================================================
-// CONTROLLER PARA SERVIÇOS - ADMIN CRUD + PUBLIC READ
+// CONTROLADOR DE SERVIÇOS - NOVA ESTRUTURA
 // =====================================================
 
 class ServiceController {
@@ -13,14 +13,16 @@ class ServiceController {
   }
 
   // =====================================================
-  // ➕ CRIAR SERVIÇO (APENAS ADMIN)
+  // 📝 CRIAR NOVO SERVIÇO (APENAS ADMIN)
   // =====================================================
 
-  createService = async (req, res) => {
+  createService = async (req, res, next) => {
     try {
       // Verificar se é admin
-      if (req.user.role !== 'admin') {
-        return ResponseUtils.forbidden(res, 'Apenas administradores podem criar serviços');
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json(
+          responses.error('Apenas administradores podem criar serviços', 403)
+        );
       }
 
       // Validar dados
@@ -32,41 +34,31 @@ class ServiceController {
       const serviceData = validation.data;
 
       // Criar serviço
-      const service = await this.serviceService.createService(serviceData, req.user.id);
+      const service = await this.serviceService.createService(serviceData);
 
-      return ResponseUtils.success(res, service, 'Serviço criado com sucesso', 201);
+      return res.status(201).json(
+        responses.created('Serviço criado com sucesso', service)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao criar serviço:', error);
 
       if (error.code === 'SERVICE_NAME_EXISTS') {
-        return ResponseUtils.conflict(res, 'Já existe um serviço com este nome');
+        return res.status(409).json(
+          responses.conflict('Já existe um serviço com este nome')
+        );
       }
-
-      if (error.code === 'INVALID_PRICE_RANGE') {
-        return ResponseUtils.badRequest(res, error.message);
-      }
-
-      if (error.code === 'INVALID_DURATION_RANGE') {
-        return ResponseUtils.badRequest(res, error.message);
-      }
-
-      if (error.code === 'INVALID_CATEGORY') {
-        return ResponseUtils.badRequest(res, error.message);
-      }
-
-      return ResponseUtils.error(res, 'Erro interno ao criar serviço');
-    }
-  };
 
   // =====================================================
   // ✏️ ATUALIZAR SERVIÇO (APENAS ADMIN)
   // =====================================================
 
-  updateService = async (req, res) => {
+  updateService = async (req, res, next) => {
     try {
       // Verificar se é admin
-      if (req.user.role !== 'admin') {
-        return ResponseUtils.forbidden(res, 'Apenas administradores podem atualizar serviços');
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json(
+          responses.error('Apenas administradores podem atualizar serviços', 403)
+        );
       }
 
       // Validar ID
@@ -86,29 +78,33 @@ class ServiceController {
       const updateData = validation.data;
 
       // Atualizar serviço
-      const service = await this.serviceService.updateService(id, updateData, req.user.id);
+      const service = await this.serviceService.updateService(id, updateData);
 
-      return ResponseUtils.success(res, service, 'Serviço atualizado com sucesso');
+      return res.status(200).json(
+        responses.success('Serviço atualizado com sucesso', service)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao atualizar serviço:', error);
 
       if (error.code === 'SERVICE_NOT_FOUND') {
-        return ResponseUtils.notFound(res, 'Serviço não encontrado');
+        return res.status(404).json(
+          responses.notFound('Serviço não encontrado')
+        );
       }
 
       if (error.code === 'SERVICE_NAME_EXISTS') {
-        return ResponseUtils.conflict(res, 'Já existe um serviço com este nome');
+        return res.status(409).json(
+          responses.conflict('Já existe um serviço com este nome')
+        );
       }
 
-      if (error.code === 'INVALID_PRICE_RANGE') {
-        return ResponseUtils.badRequest(res, error.message);
+      if (error.code === 'INVALID_DURATION') {
+        return res.status(400).json(
+          responses.badRequest(error.message)
+        );
       }
 
-      if (error.code === 'INVALID_DURATION_RANGE') {
-        return ResponseUtils.badRequest(res, error.message);
-      }
-
-      return ResponseUtils.error(res, 'Erro interno ao atualizar serviço');
+      next(error);
     }
   };
 
@@ -116,11 +112,13 @@ class ServiceController {
   // 🗑️ DELETAR SERVIÇO (APENAS ADMIN)
   // =====================================================
 
-  deleteService = async (req, res) => {
+  deleteService = async (req, res, next) => {
     try {
       // Verificar se é admin
-      if (req.user.role !== 'admin') {
-        return ResponseUtils.forbidden(res, 'Apenas administradores podem deletar serviços');
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json(
+          responses.error('Apenas administradores podem deletar serviços', 403)
+        );
       }
 
       // Validar ID
@@ -131,22 +129,28 @@ class ServiceController {
 
       const { id } = idValidation.data;
 
-      // Deletar serviço (soft delete)
-      await this.serviceService.deleteService(id, req.user.id);
+      // Deletar serviço
+      await this.serviceService.deleteService(id);
 
-      return ResponseUtils.success(res, null, 'Serviço removido com sucesso');
+      return res.status(200).json(
+        responses.success('Serviço removido com sucesso')
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao deletar serviço:', error);
 
       if (error.code === 'SERVICE_NOT_FOUND') {
-        return ResponseUtils.notFound(res, 'Serviço não encontrado');
+        return res.status(404).json(
+          responses.notFound('Serviço não encontrado')
+        );
       }
 
       if (error.code === 'SERVICE_HAS_FUTURE_APPOINTMENTS') {
-        return ResponseUtils.badRequest(res, 'Não é possível remover serviço com agendamentos futuros');
+        return res.status(400).json(
+          responses.badRequest('Não é possível remover serviço com agendamentos futuros')
+        );
       }
 
-      return ResponseUtils.error(res, 'Erro interno ao deletar serviço');
+      next(error);
     }
   };
 
@@ -154,7 +158,7 @@ class ServiceController {
   // 📋 LISTAR SERVIÇOS (PÚBLICO)
   // =====================================================
 
-  listServices = async (req, res) => {
+  listServices = async (req, res, next) => {
     try {
       // Validar parâmetros de consulta
       const validation = ServiceSchemas.listServices.safeParse(req.query);
@@ -167,10 +171,12 @@ class ServiceController {
       // Listar serviços
       const result = await this.serviceService.listServices(params);
 
-      return ResponseUtils.success(res, result, 'Serviços listados com sucesso');
+      return res.status(200).json(
+        responses.success('Serviços listados com sucesso', result)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao listar serviços:', error);
-      return ResponseUtils.error(res, 'Erro interno ao listar serviços');
+      next(error);
     }
   };
 
@@ -178,7 +184,7 @@ class ServiceController {
   // 🔍 BUSCAR SERVIÇO POR ID (PÚBLICO)
   // =====================================================
 
-  getServiceById = async (req, res) => {
+  getServiceById = async (req, res, next) => {
     try {
       // Validar ID
       const idValidation = ServiceSchemas.serviceId.safeParse(req.params);
@@ -191,15 +197,19 @@ class ServiceController {
       // Buscar serviço
       const service = await this.serviceService.getServiceById(id);
 
-      return ResponseUtils.success(res, service, 'Serviço encontrado com sucesso');
+      return res.status(200).json(
+        responses.success('Serviço encontrado com sucesso', service)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao buscar serviço:', error);
 
       if (error.code === 'SERVICE_NOT_FOUND') {
-        return ResponseUtils.notFound(res, 'Serviço não encontrado');
+        return res.status(404).json(
+          responses.notFound('Serviço não encontrado')
+        );
       }
 
-      return ResponseUtils.error(res, 'Erro interno ao buscar serviço');
+      next(error);
     }
   };
 
@@ -207,7 +217,7 @@ class ServiceController {
   // 🔍 BUSCAR SERVIÇOS (PÚBLICO)
   // =====================================================
 
-  searchServices = async (req, res) => {
+  searchServices = async (req, res, next) => {
     try {
       // Validar parâmetros de busca
       const validation = ServiceSchemas.searchServices.safeParse(req.query);
@@ -220,10 +230,12 @@ class ServiceController {
       // Buscar serviços
       const result = await this.serviceService.searchServices(params.q, params.limit);
 
-      return ResponseUtils.success(res, result, 'Busca realizada com sucesso');
+      return res.status(200).json(
+        responses.success('Busca realizada com sucesso', result)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao buscar serviços:', error);
-      return ResponseUtils.error(res, 'Erro interno ao buscar serviços');
+      next(error);
     }
   };
 
@@ -231,7 +243,7 @@ class ServiceController {
   // 📊 SERVIÇOS POPULARES (PÚBLICO)
   // =====================================================
 
-  getPopularServices = async (req, res) => {
+  getPopularServices = async (req, res, next) => {
     try {
       // Validar parâmetros
       const validation = ServiceSchemas.popularServices.safeParse(req.query);
@@ -244,55 +256,122 @@ class ServiceController {
       // Buscar serviços populares
       const result = await this.serviceService.getPopularServices(params.limit, params.days);
 
-      return ResponseUtils.success(res, result, 'Serviços populares encontrados');
+      return res.status(200).json(
+        responses.success('Serviços populares encontrados', result)
+      );
     } catch (error) {
       console.error('[ServiceController] Erro ao buscar serviços populares:', error);
-      return ResponseUtils.error(res, 'Erro interno ao buscar serviços populares');
+      next(error);
     }
   };
 
   // =====================================================
-  // 📊 RELATÓRIO DE RECEITA (APENAS ADMIN)
+  // 🎯 SERVIÇOS ATIVOS (PÚBLICO)
   // =====================================================
 
-  getServiceRevenue = async (req, res) => {
+  getActiveServices = async (req, res, next) => {
+    try {
+      const services = await this.serviceService.getActiveServices();
+
+      return res.status(200).json(
+        responses.success('Serviços ativos listados com sucesso', services)
+      );
+    } catch (error) {
+      console.error('[ServiceController] Erro ao buscar serviços ativos:', error);
+      next(error);
+    }
+  };
+
+  // =====================================================
+  // ⏰ DURAÇÃO TOTAL DE SERVIÇOS SELECIONADOS
+  // =====================================================
+
+  getServicesDuration = async (req, res, next) => {
+    try {
+      const { service_ids } = req.body;
+      
+      if (!Array.isArray(service_ids) || service_ids.length === 0) {
+        return res.status(400).json(
+          responses.badRequest('Lista de IDs de serviços é obrigatória')
+        );
+      }
+
+      const duration = await this.serviceService.getTotalDuration(service_ids);
+
+      return res.status(200).json(
+        responses.success('Duração total calculada com sucesso', { 
+          total_duration_minutes: duration 
+        })
+      );
+    } catch (error) {
+      console.error('[ServiceController] Erro ao calcular duração:', error);
+      next(error);
+    }
+  };
+
+  // =====================================================
+  // 💰 PREÇO TOTAL DE SERVIÇOS SELECIONADOS
+  // =====================================================
+
+  getServicesPrice = async (req, res, next) => {
+    try {
+      const { service_ids } = req.body;
+      
+      if (!Array.isArray(service_ids) || service_ids.length === 0) {
+        return res.status(400).json(
+          responses.badRequest('Lista de IDs de serviços é obrigatória')
+        );
+      }
+
+      const price = await this.serviceService.getTotalPrice(service_ids);
+
+      return res.status(200).json(
+        responses.success('Preço total calculado com sucesso', { 
+          total_price: price 
+        })
+      );
+    } catch (error) {
+      console.error('[ServiceController] Erro ao calcular preço:', error);
+      next(error);
+    }
+  };
+
+  // =====================================================
+  // 📱 ALTERNAR STATUS DO SERVIÇO (APENAS ADMIN)
+  // =====================================================
+
+  toggleServiceStatus = async (req, res, next) => {
     try {
       // Verificar se é admin
-      if (req.user.role !== 'admin') {
-        return ResponseUtils.forbidden(res, 'Apenas administradores podem acessar relatórios de receita');
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json(
+          responses.error('Apenas administradores podem alterar status', 403)
+        );
       }
 
-      // Validar parâmetros
-      const validation = ServiceSchemas.serviceRevenue.safeParse(req.query);
-      if (!validation.success) {
-        return ValidationMiddleware.handleValidationError(res, validation.error);
+      // Validar ID
+      const idValidation = ServiceSchemas.serviceId.safeParse(req.params);
+      if (!idValidation.success) {
+        return ValidationMiddleware.handleValidationError(res, idValidation.error);
       }
 
-      const params = validation.data;
+      const { id } = idValidation.data;
+      
+      const service = await this.serviceService.toggleServiceStatus(id);
 
-      // Obter relatório de receita
-      const revenue = await this.serviceService.getServiceRevenue(params);
-
-      return ResponseUtils.success(res, revenue, 'Relatório de receita gerado com sucesso');
+      return res.status(200).json(
+        responses.success('Status do serviço alterado com sucesso', service)
+      );
     } catch (error) {
-      console.error('[ServiceController] Erro ao gerar relatório de receita:', error);
-      return ResponseUtils.error(res, 'Erro interno ao gerar relatório de receita');
-    }
-  };
+      console.error('[ServiceController] Erro ao alterar status:', error);
 
-  // =====================================================
-  // 📂 CATEGORIAS DE SERVIÇOS (PÚBLICO)
-  // =====================================================
+      if (error.code === 'SERVICE_NOT_FOUND') {
+        return res.status(404).json(
+          responses.notFound('Serviço não encontrado')
+        );
+      }
 
-  getCategories = async (req, res) => {
-    try {
-      // Buscar categorias
-      const result = await this.serviceService.getCategories();
-
-      return ResponseUtils.success(res, result, 'Categorias encontradas com sucesso');
-    } catch (error) {
-      console.error('[ServiceController] Erro ao buscar categorias:', error);
-      return ResponseUtils.error(res, 'Erro interno ao buscar categorias');
+      next(error);
     }
   };
 }
