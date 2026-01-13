@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+coverage/
+.nyc_output/
+.vscode/
+.idea/
+*.tgz
+*.tar.gz
+temp/
+.DS_Store
+Thumbs.db
