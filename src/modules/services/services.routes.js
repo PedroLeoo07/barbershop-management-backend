@@ -61,6 +61,13 @@ router.get(
   serviceController.getServiceById
 );
 
+// GET /api/services/:id/similar - Serviços similares (público)
+router.get(
+  '/:id/similar',
+  ValidationMiddleware.validateParams(ServiceSchemas.serviceId),
+  serviceController.getSimilarServices
+);
+
 // =====================================================
 // 🔒 ROTAS PROTEGIDAS (APENAS ADMIN)
 // =====================================================
@@ -69,8 +76,7 @@ router.get(
 router.post(
   '/',
   AuthMiddleware.authenticate,
-  AuthMiddleware.requireAdmin,
-  RateLimiter.create({ windowMs: 5 * 60 * 1000, max: 10 }), // 10 requests por 5 minutos
+  ValidationMiddleware.validateBody(ServiceSchemas.createService),
   serviceController.createService
 );
 
@@ -78,8 +84,8 @@ router.post(
 router.put(
   '/:id',
   AuthMiddleware.authenticate,
-  AuthMiddleware.requireAdmin,
-  RateLimiter.create({ windowMs: 5 * 60 * 1000, max: 20 }), // 20 requests por 5 minutos
+  ValidationMiddleware.validateParams(ServiceSchemas.serviceId),
+  ValidationMiddleware.validateBody(ServiceSchemas.updateService),
   serviceController.updateService
 );
 
@@ -87,113 +93,122 @@ router.put(
 router.delete(
   '/:id',
   AuthMiddleware.authenticate,
-  AuthMiddleware.requireAdmin,
-  RateLimiter.create({ windowMs: 5 * 60 * 1000, max: 5 }), // 5 requests por 5 minutos
+  ValidationMiddleware.validateParams(ServiceSchemas.serviceId),
   serviceController.deleteService
 );
 
+// PATCH /api/services/:id/toggle - Alternar status do serviço (apenas admin)
+router.patch(
+  '/:id/toggle',
+  AuthMiddleware.authenticate,
+  ValidationMiddleware.validateParams(ServiceSchemas.serviceId),
+  serviceController.toggleServiceStatus
+);
+
 // =====================================================
-// 📊 ROTAS PARA RELATÓRIOS (APENAS ADMIN)
+// 📊 ROTAS PARA ESTATÍSTICAS (APENAS ADMIN)
 // =====================================================
 
-// GET /api/services/reports/revenue - Relatório de receita por serviços (apenas admin)
+// GET /api/services/admin/stats - Estatísticas dos serviços (apenas admin)
 router.get(
-  '/reports/revenue',
+  '/admin/stats',
   AuthMiddleware.authenticate,
-  AuthMiddleware.requireAdmin,
-  RateLimiter.create({ windowMs: 5 * 60 * 1000, max: 10 }), // 10 requests por 5 minutos
-  serviceController.getServiceRevenue
+  serviceController.getServiceStats
 );
 
 module.exports = router;
 
 // =====================================================
-// 📝 DOCUMENTAÇÃO DAS ROTAS
+// 📝 DOCUMENTAÇÃO DAS ROTAS - NOVA ESTRUTURA
 // =====================================================
 
 /* 
 🔹 ROTAS PÚBLICAS (Sem Autenticação):
 
 GET /api/services
-  - Lista todos os serviços ativos
-  - Query params: page, limit, is_active, category, search, price_min, price_max, duration_min, duration_max, is_combo
-  - Rate limit: 30/minuto
+  - Lista todos os serviços com filtros e paginação
+  - Query params: page, limit, active, search, price_min, price_max, duration_min, duration_max
+  - Exemplo: GET /api/services?page=1&limit=10&active=true&price_min=20&price_max=100
 
-GET /api/services/search?q=termo
-  - Busca serviços por nome, descrição ou categoria
+GET /api/services/search?q=termo&limit=20
+  - Busca serviços por nome
   - Query params: q (obrigatório), limit
-  - Rate limit: 20/minuto
+  - Exemplo: GET /api/services/search?q=corte
 
-GET /api/services/popular?days=30&limit=10
+GET /api/services/popular?limit=10&days=30
   - Lista serviços mais populares dos últimos X dias
-  - Query params: days, limit
-  - Rate limit: 20/minuto
+  - Query params: limit, days
+  - Exemplo: GET /api/services/popular?limit=5&days=7
 
-GET /api/services/categories
-  - Lista todas as categorias de serviços com estatísticas
-  - Rate limit: 30/minuto
+GET /api/services/active
+  - Lista apenas serviços ativos
+  - Exemplo: GET /api/services/active
+
+POST /api/services/duration
+  - Calcula duração total de lista de serviços
+  - Body: { service_ids: ["uuid1", "uuid2", ...] }
+  - Response: { total_duration_minutes: 90 }
+
+POST /api/services/price
+  - Calcula preço total de lista de serviços
+  - Body: { service_ids: ["uuid1", "uuid2", ...] }
+  - Response: { total_price: 150.00 }
 
 GET /api/services/:id
   - Busca serviço específico por ID
-  - Rate limit: 30/minuto
+  - Exemplo: GET /api/services/550e8400-e29b-41d4-a716-446655440000
+
+GET /api/services/:id/similar?limit=5
+  - Busca serviços similares (baseado em preço/duração)
+  - Query params: limit
+  - Exemplo: GET /api/services/550e8400-e29b-41d4-a716-446655440000/similar
 
 🔹 ROTAS ADMINISTRATIVAS (Apenas Admin):
 
 POST /api/services
   - Cria novo serviço
   - Body: { 
-      name, 
-      description?, 
-      price_min, 
-      price_max?, 
-      duration_min, 
-      duration_max?, 
-      category?, 
-      is_combo?, 
-      is_active? 
+      name: "Corte Masculino",
+      duration_minutes: 45,
+      price: 35.00,
+      active?: true
     }
-  - Rate limit: 10/5min
 
 PUT /api/services/:id
   - Atualiza serviço existente
   - Body: Campos a atualizar (todos opcionais)
-  - Rate limit: 20/5min
+  - Exemplo: { name: "Novo Nome", price: 40.00 }
 
 DELETE /api/services/:id
-  - Remove serviço (soft delete)
+  - Remove serviço permanentemente
   - Não permite se houver agendamentos futuros
-  - Rate limit: 5/5min
 
-GET /api/services/reports/revenue?start_date=2024-01-01&end_date=2024-01-31
-  - Relatório de receita dos serviços
-  - Query params: start_date?, end_date?, service_id?, category?, period?
-  - Rate limit: 10/5min
+PATCH /api/services/:id/toggle
+  - Alterna status ativo/inativo do serviço
+  - Response: serviço com novo status
 
-🔹 EXEMPLOS DE USO:
+GET /api/services/admin/stats
+  - Estatísticas dos serviços (total, ativos, populares, etc.)
+  - Response: { total, active, inactive, average_price, average_duration }
 
-Buscar serviços de corte:
-GET /api/services?category=corte&is_active=true
+🔹 ESTRUTURA DO SERVIÇO:
+{
+  id: "uuid",
+  name: "Nome do Serviço",
+  duration_minutes: 45,
+  price: 35.00,
+  active: true,
+  created_at: "2024-01-15T10:00:00Z",
+  updated_at: "2024-01-15T10:00:00Z"
+}
 
-Buscar serviços por preço:
-GET /api/services?price_min=20&price_max=50
-
-Buscar serviços por duração:
-GET /api/services?duration_min=30&duration_max=60
-
-Buscar serviços populares:
-GET /api/services/popular?days=7&limit=5
-
-Relatório mensal de receita:
-GET /api/services/reports/revenue?period=month
-
-🔹 CATEGORIAS VÁLIDAS:
-- corte: Cortes de cabelo
-- barba: Serviços de barba
-- sobrancelha: Design de sobrancelha  
-- tratamento: Tratamentos capilares
-- combo: Pacotes combinados
-- especial: Serviços especiais/premium
-- geral: Categoria geral
+🔹 FILTROS DISPONÍVEIS:
+- active: true/false (serviços ativos/inativos)
+- search: busca por nome
+- price_min/price_max: faixa de preço
+- duration_min/duration_max: faixa de duração
+- page/limit: paginação
+*/
 
 🔹 PERMISSÕES:
   ✅ ADMIN: Pode gerenciar serviços (CRUD completo)
