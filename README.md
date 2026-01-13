@@ -20,19 +20,25 @@ Backend profissional para sistema completo de gestão de agendamentos para barbe
 O projeto segue uma **arquitetura em camadas** bem definida:
 
 ```
-src/
-├── config/           # Configurações da aplicação
-├── controllers/      # Controladores (recebem requests HTTP)
-├── services/         # Regras de negócio
-├── repositories/     # Acesso a dados (SQL puro)
-├── middlewares/      # Middlewares personalizados
-├── models/           # Estruturas de dados e constantes
-├── utils/            # Utilitários e helpers
-├── routes/           # Definição de rotas
-├── database/         # Conexão e migrations
-│   ├── migrations/   # Scripts de criação de tabelas
-│   └── seeds/        # Dados iniciais
-└── index.js          # Ponto de entrada da aplicação
+📦 Barbershop Backend
+├── sql/                  # Scripts SQL do banco
+│   ├── 01_create_database.sql
+│   ├── 02_create_tables.sql
+│   ├── 03_insert_data.sql
+│   └── setup_database.bat
+├── src/
+│   ├── config/           # Configurações da aplicação
+│   ├── controllers/      # Controladores HTTP
+│   ├── services/         # Regras de negócio
+│   ├── repositories/     # Acesso a dados (SQL puro)
+│   ├── middlewares/      # Middlewares personalizados
+│   ├── models/           # Estruturas de dados
+│   ├── utils/            # Utilitários e helpers
+│   ├── routes/           # Definição de rotas
+│   └── database/         # Conexão com PostgreSQL
+├── server.js             # Arquivo principal da aplicação
+├── package.json          # Dependências
+└── .env.example          # Configurações de ambiente
 ```
 
 ### 📋 Camadas da Aplicação
