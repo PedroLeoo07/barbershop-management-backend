@@ -7,9 +7,9 @@ const dotenv = require('dotenv');
 // Configuração do ambiente
 dotenv.config();
 
-const { config } = require('./config');
-const { database } = require('./database');
-const { apiRoutes } = require('./routes');
+const { config } = require('./src/config');
+const { database } = require('./src/database');
+const { apiRoutes } = require('./src/routes');
 const {
   generalRateLimit,
   errorHandler,
@@ -17,7 +17,7 @@ const {
   requestLogger,
   sanitizeInput,
   securityHeaders
-} = require('./middlewares/security');
+} = require('./src/middlewares/security');
 
 class App {
   constructor() {
@@ -128,9 +128,8 @@ class App {
 
         if (config.nodeEnv === 'development') {
           console.log('💡 Comandos úteis:');
-          console.log('   npm run migration  - Executar migrations');
-          console.log('   npm run seed       - Executar seeds');
           console.log('   npm run dev        - Modo desenvolvimento');
+          console.log('   npm start          - Modo produção');
           console.log('');
         }
       });

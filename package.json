@@ -2,10 +2,10 @@
   "name": "barbearia-backend",
   "version": "1.0.0",
   "description": "Sistema completo de gestão de agendamentos para barbearia",
-  "main": "src/index.js",
+  "main": "server.js",
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
+    "dev": "nodemon server.js",
+    "start": "node server.js",
     "migration": "node src/database/migrations/run-migrations.js",
     "seed": "node src/database/seeds/run-seeds.js",
     "test": "jest"
