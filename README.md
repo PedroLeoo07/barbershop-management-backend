@@ -1,23 +1,42 @@
-# 🏪 Sistema de Gestão de Barbearia - Backend
+# =====================================================
+# 🚀 SISTEMA PROFISSIONAL DE AGENDAMENTOS - BARBEARIA
+# =====================================================
 
 Backend profissional para sistema completo de gestão de agendamentos para barbearia, desenvolvido com Node.js, JavaScript e PostgreSQL.
 
-## 🚀 Stack Tecnológica
+## ✨ Recursos Implementados
 
-- **Runtime:** Node.js 18+
-- **Linguagem:** JavaScript (ES6+)
-- **Framework:** Express.js
-- **Banco de Dados:** PostgreSQL 14+
-- **ORM/Query Builder:** SQL Puro com node-postgres (pg)
-- **Autenticação:** JWT + Refresh Token
-- **Validação:** Zod
-- **Hash de Senha:** Bcrypt
-- **Rate Limiting:** express-rate-limit
-- **Segurança:** Helmet, CORS
+### 🔥 **DIFERENCIAIS PROFISSIONAIS**
 
-## 🏗️ Arquitetura
+#### 🔒 **SQL LOCKS - Prevenção de Conflitos**
+- **FOR UPDATE NOWAIT** para prevenir double bookings
+- Transações atômicas com rollback automático
+- Locks otimizados por barbeiro e horário
+- Sistema de retry em caso de conflito
 
-O projeto segue uma **arquitetura em camadas** bem definida:
+#### ⏰ **Geração Automática de Slots**
+- Algoritmo inteligente de horários disponíveis
+- Considera horário de funcionamento e almoço
+- Filtra conflitos automaticamente
+- Slots personalizáveis por barbeiro
+
+#### 📁 **Arquitetura Modular Profissional**
+- Separação por módulos (`src/modules/`)
+- Middlewares compartilhados (`src/shared/`)
+- Repository pattern com base classes
+- Service layer com regras de negócio
+
+#### 🛡️ **Segurança Enterprise**
+- Rate limiting por tipo de operação
+- Middleware de autenticação JWT robusto
+- Validação com Zod e traduções em português
+- Tratamento de erros profissional
+
+#### 📊 **Monitoramento e Logs**
+- Health checks automáticos
+- Métricas de performance
+- Sistema de logs estruturado
+- Response padronizadas
 
 ```
 📦 Barbershop Backend
