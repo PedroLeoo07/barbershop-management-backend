@@ -190,6 +190,7 @@ class App {
         endpoints: {
           health: '/health',
           appointments: '/api/appointments',
+          payments: '/api/payments',
           auth: '/api/auth'
         }
       }, 'API Online');
@@ -197,6 +198,7 @@ class App {
 
     // Módulos da aplicação
     this.app.use('/api/appointments', appointmentRoutes);
+    this.app.use('/api/payments', paymentRoutes);
     
     // TODO: Adicionar outras rotas quando criadas
     // this.app.use('/api/auth', authRoutes);
