@@ -12,6 +12,7 @@ const { ResponseUtils } = require('./shared/utils/responses');
 // Importar módulos
 const appointmentRoutes = require('./modules/appointments/appointments.routes');
 const paymentRoutes = require('./modules/payments/payments.routes');
+const reportRoutes = require('./modules/reports/reports.routes');
 
 // =====================================================
 // CONFIGURAÇÃO PRINCIPAL DA APLICAÇÃO
